@@ -145,6 +145,7 @@ import org.telegram.messenger.camera.CameraController;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_bots;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
@@ -179,9 +180,9 @@ import org.telegram.ui.bots.BotCommandsMenuContainer;
 import org.telegram.ui.bots.BotCommandsMenuView;
 import org.telegram.ui.bots.BotKeyboardView;
 import org.telegram.ui.bots.BotWebViewAttachedSheet;
-import org.telegram.ui.bots.BotWebViewMenuContainer;
 import org.telegram.ui.bots.BotWebViewSheet;
 import org.telegram.ui.bots.ChatActivityBotWebViewButton;
+import org.telegram.ui.bots.WebViewRequestProps;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -389,7 +390,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     private String botMenuWebViewTitle;
     private String botMenuWebViewUrl;
 
-    public BotWebViewMenuContainer botWebViewMenuContainer;
+//    public BotWebViewMenuContainer botWebViewMenuContainer;
     private ChatActivityBotWebViewButton botWebViewButton;
 
     @Nullable
@@ -568,6 +569,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
             info.setLongClickable(true);
         }
     };
+
+    boolean ctrlPressed = false;
+    boolean shiftPressed = false;
 
     @Nullable
     protected EditTextCaption messageEditText;
@@ -759,7 +763,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     private Runnable openKeyboardRunnable = new Runnable() {
         @Override
         public void run() {
-            if (hasBotWebView() && botCommandsMenuIsShowing()) {
+            if (hasBotWebView() && botCommandsMenuIsShowing() || BaseFragment.hasSheets(parentFragment)) {
                 return;
             }
 
@@ -2570,12 +2574,12 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 showRestrictedHint();
                 return;
             }
-            if (hasBotWebView() && botCommandsMenuIsShowing()) {
-                if (botWebViewMenuContainer != null) {
-                    botWebViewMenuContainer.dismiss(v::callOnClick);
-                }
-                return;
-            }
+//            if (hasBotWebView() && botCommandsMenuIsShowing()) {
+//                if (botWebViewMenuContainer != null) {
+//                    botWebViewMenuContainer.dismiss(v::callOnClick);
+//                }
+//                return;
+//            }
 
             if (!isPopupShowing() || currentPopupContentType != 0) {
                 showPopup(1, 0);
@@ -3283,10 +3287,10 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         AndroidUtilities.updateViewVisibilityAnimated(botButton, false, 0.1f, false);
         attachLayout.addView(botButton, 0, LayoutHelper.createLinear(48, 48));
         botButton.setOnClickListener(v -> {
-            if (hasBotWebView() && botCommandsMenuIsShowing()) {
-                botWebViewMenuContainer.dismiss(v::callOnClick);
-                return;
-            }
+//            if (hasBotWebView() && botCommandsMenuIsShowing()) {
+//                botWebViewMenuContainer.dismiss(v::callOnClick);
+//                return;
+//            }
             if (searchingType != 0) {
                 setSearchingTypeInternal(0, false);
                 emojiView.closeSearch(false);
@@ -3906,9 +3910,10 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                     }
 
                     openWebViewMenu();
-                } else if (botWebViewMenuContainer != null) {
-                    botWebViewMenuContainer.dismiss();
                 }
+//                else if (botWebViewMenuContainer != null) {
+//                    botWebViewMenuContainer.dismiss();
+//                }
                 return;
             }
 
@@ -3968,11 +3973,23 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         createBotWebViewMenuContainer();
         Runnable onRequestWebView = () -> {
             AndroidUtilities.hideKeyboard(this);
-            BotWebViewAttachedSheet.WebViewRequestProps props = BotWebViewAttachedSheet.WebViewRequestProps.of(currentAccount, dialog_id, dialog_id, botMenuWebViewTitle, botMenuWebViewUrl, BotWebViewSheet.TYPE_BOT_MENU_BUTTON, 0, false, null, false, null, null, 0, false);
+            WebViewRequestProps props = WebViewRequestProps.of(currentAccount, dialog_id, dialog_id, botMenuWebViewTitle, botMenuWebViewUrl, BotWebViewAttachedSheet.TYPE_BOT_MENU_BUTTON, 0, false, null, false, null, null, 0, false);
             if (LaunchActivity.instance != null && LaunchActivity.instance.getBottomSheetTabs() != null && LaunchActivity.instance.getBottomSheetTabs().tryReopenTab(props) != null) {
                 if (botCommandsMenuButton != null) {
                     botCommandsMenuButton.setOpened(false);
                 }
+                return;
+            }
+            if (AndroidUtilities.isWebAppLink(botMenuWebViewUrl)) {
+                Browser.Progress progress = new Browser.Progress();
+                progress.onEnd(() -> {
+                    AndroidUtilities.runOnUIThread(() -> {
+                        if (botCommandsMenuButton != null) {
+                            botCommandsMenuButton.setOpened(false);
+                        }
+                    });
+                });
+                Browser.openAsInternalIntent(getContext(), botMenuWebViewUrl, false, progress);
                 return;
             }
             if (AndroidUtilities.isTablet()) {
@@ -3980,14 +3997,25 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 webViewSheet.setDefaultFullsize(false);
                 webViewSheet.setNeedsContext(true);
                 webViewSheet.setParentActivity(parentActivity);
-                webViewSheet.requestWebView(null, props);
+                webViewSheet.requestWebView(parentFragment, props);
                 webViewSheet.show();
 
                 if (botCommandsMenuButton != null) {
                     botCommandsMenuButton.setOpened(false);
                 }
             } else {
-                botWebViewMenuContainer.show(currentAccount, dialog_id, botMenuWebViewUrl);
+                if (parentFragment != null && parentFragment.getParentActivity() != null) {
+                    BotWebViewAttachedSheet sheet = parentFragment.createBotViewer();
+                    sheet.setDefaultFullsize(false);
+                    sheet.setNeedsContext(false);
+                    sheet.setParentActivity(parentFragment.getParentActivity());
+                    sheet.requestWebView(parentFragment, props);
+                    sheet.show();
+
+                    if (botCommandsMenuButton != null) {
+                        botCommandsMenuButton.setOpened(false);
+                    }
+                }
             }
         };
 
@@ -4205,9 +4233,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 if (scheduleButtonValue) {
                     actionScheduleButton = new ActionBarMenuSubItem(getContext(), true, !sendWithoutSoundButtonValue, resourcesProvider);
                     if (self) {
-                        actionScheduleButton.setTextAndIcon(LocaleController.getString("SetReminder", R.string.SetReminder), R.drawable.msg_calendar2);
+                        actionScheduleButton.setTextAndIcon(LocaleController.getString(R.string.SetReminder), R.drawable.msg_calendar2);
                     } else {
-                        actionScheduleButton.setTextAndIcon(LocaleController.getString("ScheduleMessage", R.string.ScheduleMessage), R.drawable.msg_calendar2);
+                        actionScheduleButton.setTextAndIcon(LocaleController.getString(R.string.ScheduleMessage), R.drawable.msg_calendar2);
                     }
                     actionScheduleButton.setMinimumWidth(dp(196));
                     actionScheduleButton.setOnClickListener(v -> {
@@ -4225,7 +4253,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                     SharedConfig.removeScheduledHint();
                     if (!self && dialog_id > 0) {
                         sendWhenOnlineButton = new ActionBarMenuSubItem(getContext(), true, !sendWithoutSoundButtonValue, resourcesProvider);
-                        sendWhenOnlineButton.setTextAndIcon(LocaleController.getString("SendWhenOnline", R.string.SendWhenOnline), R.drawable.msg_online);
+                        sendWhenOnlineButton.setTextAndIcon(LocaleController.getString(R.string.SendWhenOnline), R.drawable.msg_online);
                         sendWhenOnlineButton.setMinimumWidth(dp(196));
                         sendWhenOnlineButton.setOnClickListener(v -> {
                             if (sendPopupWindow != null && sendPopupWindow.isShowing()) {
@@ -4238,7 +4266,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 }
                 if (sendWithoutSoundButtonValue) {
                     ActionBarMenuSubItem sendWithoutSoundButton = new ActionBarMenuSubItem(getContext(), !scheduleButtonValue, true, resourcesProvider);
-                    sendWithoutSoundButton.setTextAndIcon(LocaleController.getString("SendWithoutSound", R.string.SendWithoutSound), R.drawable.input_notify_off);
+                    sendWithoutSoundButton.setTextAndIcon(LocaleController.getString(R.string.SendWithoutSound), R.drawable.input_notify_off);
                     sendWithoutSoundButton.setMinimumWidth(dp(196));
                     sendWithoutSoundButton.setOnClickListener(v -> {
                         if (sendPopupWindow != null && sendPopupWindow.isShowing()) {
@@ -4616,25 +4644,25 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     private void createBotWebViewMenuContainer() {
-        if (botWebViewMenuContainer != null) {
-            return;
-        }
-        botWebViewMenuContainer = new BotWebViewMenuContainer(getContext(), this) {
-            @Override
-            public void onDismiss() {
-                super.onDismiss();
-                if (botCommandsMenuButton != null) {
-                    botCommandsMenuButton.setOpened(false);
-                }
-            }
-        };
-        sizeNotifierLayout.addView(botWebViewMenuContainer, 15, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.BOTTOM));
-        botWebViewMenuContainer.setVisibility(GONE);
-        botWebViewMenuContainer.setOnDismissGlobalListener(()->{
-            if (botButtonsMessageObject != null && (messageEditText == null || TextUtils.isEmpty(messageEditText.getTextToUse())) && !botWebViewMenuContainer.hasSavedText()) {
-                showPopup(1, POPUP_CONTENT_BOT_KEYBOARD);
-            }
-        });
+//        if (botWebViewMenuContainer != null) {
+//            return;
+//        }
+//        botWebViewMenuContainer = new BotWebViewMenuContainer(getContext(), this) {
+//            @Override
+//            public void onDismiss() {
+//                super.onDismiss();
+//                if (botCommandsMenuButton != null) {
+//                    botCommandsMenuButton.setOpened(false);
+//                }
+//            }
+//        };
+//        sizeNotifierLayout.addView(botWebViewMenuContainer, 15, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.BOTTOM));
+//        botWebViewMenuContainer.setVisibility(GONE);
+//        botWebViewMenuContainer.setOnDismissGlobalListener(()->{
+//            if (botButtonsMessageObject != null && (messageEditText == null || TextUtils.isEmpty(messageEditText.getTextToUse())) && !botWebViewMenuContainer.hasSavedText()) {
+//                showPopup(1, POPUP_CONTENT_BOT_KEYBOARD);
+//            }
+//        });
     }
 
     private ArrayList<TextWatcher> messageEditTextWatchers;
@@ -5062,10 +5090,12 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         messageEditTextContainer.addView(messageEditText, 1, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM, 52, 0, isChat ? 50 : 2, 1.5f));
         messageEditText.setOnKeyListener(new OnKeyListener() {
 
-            boolean ctrlPressed = false;
-
             @Override
             public boolean onKey(View view, int keyCode, KeyEvent keyEvent) {
+                if (keyEvent != null) {
+                    shiftPressed = keyEvent.isShiftPressed();
+                    ctrlPressed = keyEvent.isCtrlPressed();
+                }
                 if (keyCode == KeyEvent.KEYCODE_BACK && !keyboardVisible && isPopupShowing() && keyEvent.getAction() == KeyEvent.ACTION_UP) {
                     if (ContentPreviewViewer.hasInstance() && ContentPreviewViewer.getInstance().isVisible()) {
                         ContentPreviewViewer.getInstance().closeWithMenu();
@@ -5100,11 +5130,8 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                         }
                     }
                     return true;
-                } else if (keyCode == KeyEvent.KEYCODE_ENTER && (ctrlPressed || sendByEnter) && keyEvent.getAction() == KeyEvent.ACTION_DOWN && editingMessageObject == null) {
+                } else if (keyCode == KeyEvent.KEYCODE_ENTER && !keyEvent.isShiftPressed() && (sendByEnter ? !keyEvent.isCtrlPressed() : keyEvent.isCtrlPressed()) && keyEvent.getAction() == KeyEvent.ACTION_DOWN && editingMessageObject == null) {
                     sendMessage();
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_CTRL_LEFT || keyCode == KeyEvent.KEYCODE_CTRL_RIGHT) {
-                    ctrlPressed = keyEvent.getAction() == KeyEvent.ACTION_DOWN;
                     return true;
                 }
                 return false;
@@ -5112,15 +5139,13 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         });
         messageEditText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
 
-            boolean ctrlPressed = false;
-
             @Override
             public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
                 if (i == EditorInfo.IME_ACTION_SEND) {
                     sendMessage();
                     return true;
                 } else if (keyEvent != null && i == EditorInfo.IME_NULL) {
-                    if ((ctrlPressed || sendByEnter) && keyEvent.getAction() == KeyEvent.ACTION_DOWN && editingMessageObject == null) {
+                    if (!keyEvent.isShiftPressed() && (sendByEnter ? !keyEvent.isCtrlPressed() : keyEvent.isCtrlPressed()) && keyEvent.getAction() == KeyEvent.ACTION_DOWN && editingMessageObject == null) {
                         sendMessage();
                         return true;
                     }
@@ -5179,7 +5204,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 if (innerTextChange == 1) {
                     return;
                 }
-                if (sendByEnter && !ignoreTextChange && !isPaste && editingMessageObject == null && count > before && charSequence.length() > 0 && charSequence.length() == start + count && charSequence.charAt(charSequence.length() - 1) == '\n') {
+                if (sendByEnter && !ctrlPressed && !shiftPressed && !ignoreTextChange && !isPaste && editingMessageObject == null && count > before && charSequence.length() > 0 && charSequence.length() == start + count && charSequence.charAt(charSequence.length() - 1) == '\n') {
                     nextChangeIsSend = true;
                 }
                 isPaste = false;
@@ -5643,15 +5668,15 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     public void onAdjustPanTransitionUpdate(float y, float progress, boolean keyboardVisible) {
-        if (botWebViewMenuContainer != null) {
-            botWebViewMenuContainer.setTranslationY(y);
-        }
+//        if (botWebViewMenuContainer != null) {
+//            botWebViewMenuContainer.setTranslationY(y);
+//        }
     }
 
     public void onAdjustPanTransitionEnd() {
-        if (botWebViewMenuContainer != null) {
-            botWebViewMenuContainer.onPanTransitionEnd();
-        }
+//        if (botWebViewMenuContainer != null) {
+//            botWebViewMenuContainer.onPanTransitionEnd();
+//        }
         if (onKeyboardClosed != null) {
             onKeyboardClosed.run();
             onKeyboardClosed = null;
@@ -5659,9 +5684,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     public void onAdjustPanTransitionStart(boolean keyboardVisible, int contentHeight) {
-        if (botWebViewMenuContainer != null) {
-            botWebViewMenuContainer.onPanTransitionStart(keyboardVisible, contentHeight);
-        }
+//        if (botWebViewMenuContainer != null) {
+//            botWebViewMenuContainer.onPanTransitionStart(keyboardVisible, contentHeight);
+//        }
         if (keyboardVisible && showTopViewRunnable != null) {
             AndroidUtilities.cancelRunOnUIThread(showTopViewRunnable);
             showTopViewRunnable.run();
@@ -5672,9 +5697,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
             setTextFieldRunnable.run();
         }
 
-        if (keyboardVisible && messageEditText != null && messageEditText.hasFocus() && hasBotWebView() && botCommandsMenuIsShowing() && botWebViewMenuContainer != null) {
-            botWebViewMenuContainer.dismiss();
-        }
+//        if (keyboardVisible && messageEditText != null && messageEditText.hasFocus() && hasBotWebView() && botCommandsMenuIsShowing() && botWebViewMenuContainer != null) {
+//            botWebViewMenuContainer.dismiss();
+//        }
     }
 
     private void onWindowSizeChanged() {
@@ -5867,7 +5892,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         }
 
         int visibility = getVisibility();
-        if (showKeyboardOnResume && parentFragment != null && parentFragment.isLastFragment()) {
+        if (showKeyboardOnResume && !BaseFragment.hasSheets(parentFragment)) {
             showKeyboardOnResume = false;
             if (delegate != null) {
                 delegate.onKeyboardRequested();
@@ -6077,7 +6102,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 TLRPC.Chat chat = accountInstance.getMessagesController().getChat(-dialog_id);
                 TLRPC.ChatFull chatFull = accountInstance.getMessagesController().getChatFull(-dialog_id);
                 isChannel = ChatObject.isChannelAndNotMegaGroup(chat);
-                anonymously = ChatObject.getSendAsPeerId(chat, chatFull) == -dialog_id;
+                anonymously = !isChannel && ChatObject.getSendAsPeerId(chat, chatFull) == -dialog_id;
             }
             if (anonymously) {
                 messageEditText.setHintText(getString("SendAnonymously", R.string.SendAnonymously));
@@ -7526,6 +7551,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                             animators.add(ObjectAnimator.ofFloat(scheduledButton, View.ALPHA, 1.0f));
                             animators.add(ObjectAnimator.ofFloat(scheduledButton, View.SCALE_X, 1.0f));
                             animators.add(ObjectAnimator.ofFloat(scheduledButton, View.TRANSLATION_X, giftButton != null && giftButton.getVisibility() == VISIBLE ? -dp(48) : 0));
+                            if (notifyButton != null && notifyButton.getVisibility() == View.VISIBLE) {
+                                notifyButton.setVisibility(View.GONE);
+                            }
                         } else {
                             scheduledButton.setAlpha(1.0f);
                             scheduledButton.setScaleX(1.0f);
@@ -9268,8 +9296,11 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         if (messageEditText == null || am.isTouchExplorationEnabled()) {
             return;
         }
+        if (focus && BaseFragment.hasSheets(parentFragment)) {
+            focus = false;
+        }
         if (focus) {
-            if (searchingType == 0 && !messageEditText.isFocused() && (botWebViewMenuContainer == null || botWebViewMenuContainer.getVisibility() == View.GONE)) {
+            if (searchingType == 0 && !messageEditText.isFocused()/* && (botWebViewMenuContainer == null || botWebViewMenuContainer.getVisibility() == View.GONE)*/) {
                 AndroidUtilities.runOnUIThread(focusRunnable = () -> {
                     focusRunnable = null;
                     boolean allowFocus;
@@ -9509,13 +9540,15 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
             return;
         }
         createMessageEditText();
+        TLRPC.Chat chat = parentFragment.getMessagesController().getChat(-dialog_id);
         TLRPC.ChatFull full = parentFragment.getMessagesController().getChatFull(-dialog_id);
         TLRPC.Peer defPeer = full != null ? full.default_send_as : null;
         if (defPeer == null && delegate.getSendAsPeers() != null && !delegate.getSendAsPeers().peers.isEmpty()) {
             defPeer = delegate.getSendAsPeers().peers.get(0).peer;
         }
         boolean isVisible = defPeer != null && (delegate.getSendAsPeers() == null || delegate.getSendAsPeers().peers.size() > 1) &&
-            !isEditingMessage() && !isRecordingAudioVideo() && (recordedAudioPanel == null || recordedAudioPanel.getVisibility() != View.VISIBLE);
+            !isEditingMessage() && !isRecordingAudioVideo() && (recordedAudioPanel == null || recordedAudioPanel.getVisibility() != View.VISIBLE) &&
+            (!ChatObject.isChannelAndNotMegaGroup(chat) || ChatObject.canSendAsPeers(chat));
         if (isVisible) {
             createSenderSelectView();
         }
@@ -9649,7 +9682,8 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     public boolean onBotWebViewBackPressed() {
-        return botWebViewMenuContainer != null && botWebViewMenuContainer.onBackPressed();
+        return false;
+//        return botWebViewMenuContainer != null && botWebViewMenuContainer.onBackPressed();
     }
 
     public boolean hasBotWebView() {
@@ -9878,7 +9912,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                         return;
                     }
 
-                    BotWebViewAttachedSheet.WebViewRequestProps props = BotWebViewAttachedSheet.WebViewRequestProps.of(currentAccount, messageObject.messageOwner.dialog_id, botId, button.text, button.url, button instanceof TLRPC.TL_keyboardButtonSimpleWebView ? BotWebViewSheet.TYPE_SIMPLE_WEB_VIEW_BUTTON : BotWebViewSheet.TYPE_WEB_VIEW_BUTTON, replyMessageObject != null ? replyMessageObject.messageOwner.id : 0, false, null, false, null, null, 0, false);
+                    final WebViewRequestProps props = WebViewRequestProps.of(currentAccount, messageObject.messageOwner.dialog_id, botId, button.text, button.url, button instanceof TLRPC.TL_keyboardButtonSimpleWebView ? BotWebViewAttachedSheet.TYPE_SIMPLE_WEB_VIEW_BUTTON : BotWebViewAttachedSheet.TYPE_WEB_VIEW_BUTTON, replyMessageObject != null ? replyMessageObject.messageOwner.id : 0, false, null, false, null, null, 0, false);
                     if (LaunchActivity.instance != null && LaunchActivity.instance.getBottomSheetTabs() != null && LaunchActivity.instance.getBottomSheetTabs().tryReopenTab(props) != null) {
                         if (botCommandsMenuButton != null) {
                             botCommandsMenuButton.setOpened(false);
@@ -9888,14 +9922,14 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                     if (AndroidUtilities.isTablet()) {
                         BotWebViewSheet webViewSheet = new BotWebViewSheet(getContext(), resourcesProvider);
                         webViewSheet.setParentActivity(parentActivity);
-                        webViewSheet.requestWebView(null, props);
+                        webViewSheet.requestWebView(parentFragment, props);
                         webViewSheet.show();
                     } else {
                         BotWebViewAttachedSheet webViewSheet = parentFragment.createBotViewer();
                         webViewSheet.setDefaultFullsize(false);
                         webViewSheet.setNeedsContext(true);
                         webViewSheet.setParentActivity(parentActivity);
-                        webViewSheet.requestWebView(null, props);
+                        webViewSheet.requestWebView(parentFragment, props);
                         webViewSheet.show();
                     }
                 }
@@ -9967,7 +10001,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                 }
 
                 DialogsActivity fragment = new DialogsActivity(args);
-                fragment.setDelegate((fragment1, dids, message, param, topicsFragment) -> {
+                fragment.setDelegate((fragment1, dids, message, param, notify, scheduleDate, topicsFragment) -> {
                     long uid = messageObject.messageOwner.from_id.user_id;
                     if (messageObject.messageOwner.via_bot_id != 0) {
                         uid = messageObject.messageOwner.via_bot_id;
@@ -10048,7 +10082,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
                     FileLog.e(e);
                 }
                 DialogsActivity fragment = new DialogsActivity(args);
-                fragment.setDelegate((dialogFragment, dids, message, param, topicsFragment) -> {
+                fragment.setDelegate((dialogFragment, dids, message, param, notify, scheduleDate, topicsFragment) -> {
                     if (dids != null && !dids.isEmpty()) {
                         TLRPC.TL_messages_sendBotRequestedPeer req = new TLRPC.TL_messages_sendBotRequestedPeer();
                         req.peer = MessagesController.getInstance(currentAccount).getInputPeer(messageObject.messageOwner.peer_id);
@@ -10987,7 +11021,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     public void openKeyboardInternal() {
-        if (hasBotWebView() && botCommandsMenuIsShowing()) {
+        if (hasBotWebView() && botCommandsMenuIsShowing() || BaseFragment.hasSheets(parentFragment)) {
             return;
         }
         showPopup(AndroidUtilities.usingHardwareInput || AndroidUtilities.isInMultiwindow || parentFragment != null && parentFragment.isInBubbleMode() || isPaused ? 0 : 2, 0);
@@ -11027,7 +11061,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
     }
 
     public void openKeyboard() {
-        if (hasBotWebView() && botCommandsMenuIsShowing()) {
+        if (hasBotWebView() && botCommandsMenuIsShowing() || BaseFragment.hasSheets(parentFragment)) {
             return;
         }
         if (delegate != null) {
@@ -11175,7 +11209,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         checkBotMenu();
         if (keyboardVisible && isPopupShowing() && stickersExpansionAnim == null) {
             showPopup(0, currentPopupContentType);
-        } else if (!keyboardVisible && !isPopupShowing() && botButtonsMessageObject != null && replyingMessageObject != botButtonsMessageObject && (!hasBotWebView() || !botCommandsMenuIsShowing()) && (messageEditText == null || TextUtils.isEmpty(messageEditText.getText())) && botReplyMarkup != null && !botReplyMarkup.rows.isEmpty()) {
+        } else if (!keyboardVisible && !isPopupShowing() && botButtonsMessageObject != null && replyingMessageObject != botButtonsMessageObject && (!hasBotWebView() && !botCommandsMenuIsShowing() && !BaseFragment.hasSheets(parentFragment)) && (messageEditText == null || TextUtils.isEmpty(messageEditText.getText())) && botReplyMarkup != null && !botReplyMarkup.rows.isEmpty()) {
             if (sizeNotifierLayout.adjustPanLayoutHelper.animationInProgress()) {
                 sizeNotifierLayout.adjustPanLayoutHelper.stopTransition();
             } else {
@@ -11463,11 +11497,11 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
             updateRecordInterface(RECORD_STATE_CANCEL_BY_TIME, true);
         } else if (id == NotificationCenter.updateBotMenuButton) {
             long botId = (long) args[0];
-            TLRPC.BotMenuButton botMenuButton = (TLRPC.BotMenuButton) args[1];
+            TL_bots.BotMenuButton botMenuButton = (TL_bots.BotMenuButton) args[1];
 
             if (botId == dialog_id) {
-                if (botMenuButton instanceof TLRPC.TL_botMenuButton) {
-                    TLRPC.TL_botMenuButton webViewButton = (TLRPC.TL_botMenuButton) botMenuButton;
+                if (botMenuButton instanceof TL_bots.TL_botMenuButton) {
+                    TL_bots.TL_botMenuButton webViewButton = (TL_bots.TL_botMenuButton) botMenuButton;
                     botMenuWebViewTitle = webViewButton.text;
                     botMenuWebViewUrl = webViewButton.url;
                     botMenuButtonType = BotMenuButtonType.WEB_VIEW;
@@ -11726,7 +11760,7 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         if (isInVideoMode() && recordedAudioPanel != null && recordedAudioPanel.getVisibility() == View.VISIBLE) {
             return false;
         }
-        if (hasBotWebView() && botCommandsMenuButton.isOpened()) {
+        if (hasBotWebView() && botCommandsMenuButton.isOpened() || BaseFragment.hasSheets(parentFragment)) {
             return false;
         }
         return true;
@@ -12331,11 +12365,11 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
             botWebViewButton.getLayoutParams().height = getMeasuredHeight() - dp(2);
             measureChild(botWebViewButton, widthMeasureSpec, heightMeasureSpec);
         }
-        if (botWebViewMenuContainer != null) {
-            MarginLayoutParams params = (MarginLayoutParams) botWebViewMenuContainer.getLayoutParams();
-            params.bottomMargin = messageEditText == null ? 0 : messageEditText.getMeasuredHeight();
-            measureChild(botWebViewMenuContainer, widthMeasureSpec, heightMeasureSpec);
-        }
+//        if (botWebViewMenuContainer != null) {
+//            MarginLayoutParams params = (MarginLayoutParams) botWebViewMenuContainer.getLayoutParams();
+//            params.bottomMargin = messageEditText == null ? 0 : messageEditText.getMeasuredHeight();
+//            measureChild(botWebViewMenuContainer, widthMeasureSpec, heightMeasureSpec);
+//        }
     }
 
     @Override
@@ -12357,20 +12391,20 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         }
     }
 
-    private LongSparseArray<TLRPC.BotInfo> lastBotInfo;
+    private LongSparseArray<TL_bots.BotInfo> lastBotInfo;
 
-    public void setBotInfo(LongSparseArray<TLRPC.BotInfo> botInfo) {
+    public void setBotInfo(LongSparseArray<TL_bots.BotInfo> botInfo) {
         setBotInfo(botInfo, true);
     }
 
-    public void setBotInfo(LongSparseArray<TLRPC.BotInfo> botInfo, boolean animate) {
+    public void setBotInfo(LongSparseArray<TL_bots.BotInfo> botInfo, boolean animate) {
         lastBotInfo = botInfo;
 
         if (botInfo.size() == 1 && botInfo.valueAt(0).user_id == dialog_id) {
-            TLRPC.BotInfo info = botInfo.valueAt(0);
-            TLRPC.BotMenuButton menuButton = info.menu_button;
-            if (menuButton instanceof TLRPC.TL_botMenuButton) {
-                TLRPC.TL_botMenuButton webViewButton = (TLRPC.TL_botMenuButton) menuButton;
+            TL_bots.BotInfo info = botInfo.valueAt(0);
+            TL_bots.BotMenuButton menuButton = info.menu_button;
+            if (menuButton instanceof TL_bots.TL_botMenuButton) {
+                TL_bots.TL_botMenuButton webViewButton = (TL_bots.TL_botMenuButton) menuButton;
                 botMenuWebViewTitle = webViewButton.text;
                 botMenuWebViewUrl = webViewButton.url;
                 botMenuButtonType = BotMenuButtonType.WEB_VIEW;
@@ -12400,9 +12434,9 @@ public class ChatActivityEnterView extends BlurredFrameLayout implements Notific
         }
 
         if (hasBotWebView()) {
-            if (botWebViewMenuContainer != null) {
-                botWebViewMenuContainer.dismiss();
-            }
+//            if (botWebViewMenuContainer != null) {
+//                botWebViewMenuContainer.dismiss();
+//            }
         } else {
             if (botCommandsMenuContainer != null) {
                 botCommandsMenuContainer.dismiss();
